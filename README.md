@@ -1,58 +1,92 @@
-# Waiveo Releases
+# Waiveo Host
 
-Official release downloads for [Waiveo](https://waiveo.io) - Home Automation made simple.
+**Waiveo Host** is a management layer that installs, configures, and manages [Waiveo](https://waiveo.com) on dedicated hardware. It provides a web-based management interface, automatic updates, backup/restore, and system monitoring.
 
-## Quick Install
+> **Note:** Waiveo is currently in private beta. Open source release coming soon!
 
-### One-Line Installer (Recommended)
+## Hosting Options
 
-For Ubuntu 20.04+, Debian 11+ on x86_64 or arm64:
+There are three ways to run Waiveo:
+
+| Method | Best For | Uses Waiveo Host? |
+|--------|----------|-------------------|
+| **Docker** | Existing servers, NAS, homelabs | No - use Waiveo directly |
+| **Raspberry Pi** | Dedicated appliance | Yes - pre-built image |
+| **x86 Linux** | Dedicated server/mini PC | Yes - CLI installer |
+
+### Option 1: Docker (Advanced Users)
+
+If you already have a server running Docker, you don't need Waiveo Host. Just run Waiveo directly:
+
+```bash
+docker run -d \
+  --name waiveo \
+  --restart unless-stopped \
+  --network host \
+  --privileged \
+  -v waiveo-data:/app/data \
+  maaxton/waiveo:latest
+```
+
+Access at `http://<your-server-ip>:5173`
+
+### Option 2: Raspberry Pi Image
+
+For a dedicated Waiveo appliance on Raspberry Pi 4/5 (4GB+ RAM):
+
+1. Download the latest image from [Releases](https://github.com/maaxton/waiveo-host-releases/releases)
+2. Flash to SD card using [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
+3. Insert SD card and boot your Pi
+4. Access setup at `http://waiveo.local`
+
+**Includes:**
+- Pre-configured Raspberry Pi OS (64-bit)
+- Docker with Waiveo
+- Web-based management interface (port 80)
+- Automatic resource optimization for Pi hardware
+- SD card-friendly caching (reduces wear)
+
+### Option 3: x86 Linux Installer
+
+For a dedicated x86_64 or arm64 server running Ubuntu/Debian:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash
 ```
 
-### Raspberry Pi Image
+**Requirements:**
+- Ubuntu 20.04+ or Debian 11+
+- 4GB+ RAM (2GB minimum)
+- 10GB+ free disk space
 
-For Raspberry Pi 4/5 with 4GB+ RAM:
+**Includes:**
+- Docker installation (if not present)
+- Waiveo container with auto-restart
+- Web-based management interface (port 80)
+- CLI tools for management
 
-1. Download the latest `.img.xz` from [Releases](https://github.com/maaxton/waiveo-host-releases/releases)
-2. Flash to SD card using [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-3. Insert SD card and boot your Pi
-4. Access setup at `http://waiveo.local`
+## What is Waiveo Host?
 
-## System Requirements
+Waiveo Host provides:
 
-### CLI Install (x86_64 / arm64)
-
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| OS | Ubuntu 20.04, Debian 11 | Ubuntu 22.04+ |
-| RAM | 2 GB | 4 GB+ |
-| Storage | 5 GB | 10 GB+ |
-| Architecture | x86_64, arm64 | x86_64, arm64 |
-
-### Raspberry Pi Image
-
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| Model | Raspberry Pi 4 | Raspberry Pi 5 |
-| RAM | 4 GB | 8 GB |
-| Storage | 16 GB SD card | 32 GB+ SD card |
+- **Web Management UI** - Start/stop, view logs, update Waiveo from your browser
+- **First-Boot Setup** - Guided setup wizard for credentials and initial configuration
+- **Automatic Updates** - Check for and install Waiveo updates
+- **Backup & Restore** - Create and restore backups of your Waiveo data
+- **System Monitoring** - CPU, memory, disk, temperature (Pi), throttle detection (Pi)
+- **CLI Tools** - `waiveo status`, `waiveo logs`, `waiveo update`, etc.
 
 ## Default Credentials
 
 After installation, access the web interface:
 
-- **URL:** `http://<ip-address>` or `http://waiveo.local`
+- **URL:** `http://<ip-address>` or `http://waiveo.local` (Pi only)
 - **Username:** `waiveo`
 - **Password:** `TemporaryBootstrapPassword123!`
 
 You will be prompted to change the password on first login.
 
 ## CLI Commands
-
-After installation, the following commands are available:
 
 ```bash
 waiveo status      # Check service status
@@ -65,51 +99,9 @@ waiveo info        # Show system information
 waiveo --help      # Show all available commands
 ```
 
-## Verify Downloads
-
-All releases include SHA256 checksums. To verify:
-
-```bash
-# Download the checksum file
-curl -fsSLO https://github.com/maaxton/waiveo-host-releases/releases/latest/download/SHA256SUMS
-
-# Verify your download
-sha256sum -c SHA256SUMS --ignore-missing
-```
-
-## Troubleshooting
-
-### Cannot access waiveo.local
-
-- Ensure your device supports mDNS (most do)
-- Try accessing via IP address instead: `http://<ip-address>`
-- On the device, run `waiveo network` to see the IP
-
-### Docker installation failed
-
-```bash
-# Manually install Docker
-curl -fsSL https://get.docker.com | sudo sh
-sudo systemctl enable docker
-sudo systemctl start docker
-
-# Re-run Waiveo installer
-curl -fsSL https://get.waiveo.io | sudo bash
-```
-
-### Service not starting
-
-```bash
-# Check service status
-sudo systemctl status waiveo-management
-
-# View logs
-sudo journalctl -u waiveo-management -f
-```
-
 ## Uninstall
 
-To completely remove Waiveo:
+To completely remove Waiveo Host:
 
 ```bash
 # Stop services
@@ -123,7 +115,7 @@ sudo rm -rf /opt/waiveo
 sudo rm -f /usr/local/bin/waiveo*
 sudo rm -f /etc/systemd/system/waiveo*.service
 
-# Remove Docker volume (WARNING: deletes all data)
+# Remove Docker volume (WARNING: deletes all Waiveo data)
 sudo docker volume rm waiveo_waiveo-data
 
 # Reload systemd
@@ -133,8 +125,8 @@ sudo systemctl daemon-reload
 ## Support
 
 - [GitHub Issues](https://github.com/maaxton/waiveo-host-releases/issues)
-- [Documentation](https://waiveo.com/docs)
+- [Waiveo Website](https://waiveo.com)
 
 ## License
 
-Waiveo is open source software. See the main repository for license details.
+Waiveo Host is open source. See the [main repository](https://github.com/maaxton/waiveo-host) for license details.
