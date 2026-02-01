@@ -4,8 +4,8 @@
 # Architectures: x86_64, arm64
 #
 # Usage:
-#   curl -fsSL https://get.waiveo.com | sudo bash
-#   curl -fsSL https://get.waiveo.com | sudo bash -s -- --version v1.0.0
+#   curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash -s -- --version v1.0.0
 #
 # Environment variables:
 #   WAIVEO_VERSION - specific version to install (default: latest)
@@ -335,8 +335,8 @@ parse_args() {
             --help|-h)
                 echo "Waiveo Installer"
                 echo ""
-                echo "Usage: curl -fsSL https://get.waiveo.com | sudo bash"
-                echo "       curl -fsSL https://get.waiveo.com | sudo bash -s -- [options]"
+                echo "Usage: curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash"
+                echo "       curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash -s -- [options]"
                 echo ""
                 echo "Options:"
                 echo "  --version, -v VERSION   Install specific version (e.g., v1.0.0)"
