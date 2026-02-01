@@ -9,7 +9,7 @@ Official release downloads for [Waiveo](https://waiveo.io) - Home Automation mad
 For Ubuntu 20.04+, Debian 11+ on x86_64 or arm64:
 
 ```bash
-curl -fsSL https://get.waiveo.io | sudo bash
+curl -fsSL https://get.waiveo.com | sudo bash
 ```
 
 ### Raspberry Pi Image
@@ -133,7 +133,7 @@ sudo systemctl daemon-reload
 ## Support
 
 - [GitHub Issues](https://github.com/maaxton/waiveo-host-releases/issues)
-- [Documentation](https://waiveo.io/docs)
+- [Documentation](https://waiveo.com/docs)
 
 ## License
 
