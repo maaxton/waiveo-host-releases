@@ -76,15 +76,22 @@ Waiveo Host provides:
 - **System Monitoring** - CPU, memory, disk, temperature (Pi), throttle detection (Pi)
 - **CLI Tools** - `waiveo status`, `waiveo logs`, `waiveo update`, etc.
 
-## Default Credentials
+## Credentials & Access
 
-After installation, access the web interface:
+After installation, access the web interface at `http://<ip-address>`
 
-- **URL:** `http://<ip-address>` or `http://waiveo.local` (Pi only)
+### Raspberry Pi Image
+
+- **URL:** `http://waiveo.local` or `http://<ip-address>`
 - **Username:** `waiveo`
 - **Password:** `TemporaryBootstrapPassword123!`
+- You will be prompted to change the password on first login.
 
-You will be prompted to change the password on first login.
+### x86 Linux Install
+
+- **URL:** `http://<ip-address>`
+- **Login:** Use your existing Linux username and password
+- The management UI authenticates against your system credentials via PAM.
 
 ## CLI Commands
 

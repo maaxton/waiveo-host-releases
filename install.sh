@@ -246,15 +246,17 @@ download_release() {
 configure_system() {
     info "Configuring system..."
     
-    # Set hostname if not already waiveo
-    local current_hostname=$(hostname)
-    if [ "$current_hostname" != "waiveo" ]; then
-        info "Setting hostname to 'waiveo'..."
-        hostnamectl set-hostname waiveo
-        
-        # Update /etc/hosts
-        if ! grep -q "waiveo" /etc/hosts; then
-            echo "127.0.1.1 waiveo" >> /etc/hosts
+    # Only change hostname on Pi (x86 users likely have their own hostname)
+    if is_raspberry_pi; then
+        local current_hostname=$(hostname)
+        if [ "$current_hostname" != "waiveo" ]; then
+            info "Setting hostname to 'waiveo'..."
+            hostnamectl set-hostname waiveo
+            
+            # Update /etc/hosts
+            if ! grep -q "waiveo" /etc/hosts; then
+                echo "127.0.1.1 waiveo" >> /etc/hosts
+            fi
         fi
     fi
     
@@ -262,15 +264,16 @@ configure_system() {
     systemctl enable avahi-daemon 2>/dev/null || true
     systemctl start avahi-daemon 2>/dev/null || true
     
-    # Create waiveo user if it doesn't exist
-    if ! id -u waiveo &>/dev/null; then
-        info "Creating waiveo user..."
-        useradd -m -s /bin/bash -G sudo,docker waiveo 2>/dev/null || true
-        echo 'waiveo:TemporaryBootstrapPassword123!' | chpasswd
+    # On x86, don't create a waiveo user - users have their own accounts
+    # The management UI authenticates against existing system users via PAM
+    # Just ensure the current user (who ran sudo) can use Docker
+    if ! is_raspberry_pi; then
+        # Add the user who ran sudo to docker group
+        if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+            usermod -aG docker "$SUDO_USER" 2>/dev/null || true
+            info "Added $SUDO_USER to docker group (re-login to take effect)"
+        fi
     fi
-    
-    # Add waiveo to docker group
-    usermod -aG docker waiveo 2>/dev/null || true
     
     success "System configured"
 }
@@ -308,13 +311,20 @@ print_complete() {
     echo ""
     echo -e "Access Waiveo at:"
     echo -e "  ${BOLD}http://${ip}${NC}"
-    echo -e "  ${BOLD}http://waiveo.local${NC} (if mDNS works)"
-    echo ""
-    echo -e "Default credentials:"
-    echo -e "  Username: ${BOLD}waiveo${NC}"
-    echo -e "  Password: ${BOLD}TemporaryBootstrapPassword123!${NC}"
-    echo ""
-    echo -e "${YELLOW}You will be prompted to change the password on first login.${NC}"
+    
+    if is_raspberry_pi; then
+        echo -e "  ${BOLD}http://waiveo.local${NC}"
+        echo ""
+        echo -e "Default credentials:"
+        echo -e "  Username: ${BOLD}waiveo${NC}"
+        echo -e "  Password: ${BOLD}TemporaryBootstrapPassword123!${NC}"
+        echo ""
+        echo -e "${YELLOW}You will be prompted to change the password on first login.${NC}"
+    else
+        echo ""
+        echo -e "Login with your ${BOLD}existing Linux username and password${NC}."
+        echo -e "(The management UI uses your system credentials)"
+    fi
     echo ""
     echo -e "CLI commands available:"
     echo -e "  ${CYAN}waiveo status${NC}   - Check service status"
