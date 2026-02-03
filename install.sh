@@ -18,6 +18,11 @@ GITHUB_REPO="maaxton/waiveo-host-releases"
 RELEASES_URL="https://github.com/${GITHUB_REPO}/releases"
 INSTALL_DIR="/opt/waiveo"
 
+# Install options (can be set via command line)
+SET_HOSTNAME="${SET_HOSTNAME:-false}"
+WAIVEO_PORT="${WAIVEO_PORT:-80}"
+INTERACTIVE_MODE="true"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -201,6 +206,104 @@ install_docker() {
     success "Docker installed successfully"
 }
 
+# Show interactive configuration menu using Python
+show_interactive_menu() {
+    # Check if we have a terminal available
+    if [ ! -e /dev/tty ]; then
+        warn "No terminal available for interactive mode, using defaults"
+        return
+    fi
+    
+    info "Starting interactive configuration..."
+    echo ""
+    
+    # Run Python script for interactive prompts
+    local config_output
+    config_output=$(python3 << 'PYTHON_SCRIPT'
+import sys
+
+# ANSI colors
+CYAN = '\033[0;36m'
+GREEN = '\033[0;32m'
+YELLOW = '\033[1;33m'
+BOLD = '\033[1m'
+NC = '\033[0m'  # No Color
+
+def get_input(prompt, default=""):
+    """Get input from /dev/tty to work with piped scripts"""
+    try:
+        with open('/dev/tty', 'r') as tty:
+            sys.stderr.write(prompt)
+            sys.stderr.flush()
+            return tty.readline().strip()
+    except:
+        return default
+
+def ask_yes_no(question, default=False):
+    """Ask a yes/no question"""
+    hint = "[Y/n]" if default else "[y/N]"
+    response = get_input(f"{CYAN}{question}{NC} {hint}: ")
+    if not response:
+        return default
+    return response.lower() in ('y', 'yes')
+
+def ask_input(question, default, hint=""):
+    """Ask for text input"""
+    prompt = f"{CYAN}{question}{NC}"
+    if hint:
+        prompt += f" {hint}"
+    prompt += f" [{default}]: "
+    response = get_input(prompt)
+    return response if response else default
+
+# Print header
+sys.stderr.write(f"\n{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{NC}\n")
+sys.stderr.write(f"{BOLD}       Waiveo Configuration{NC}\n")
+sys.stderr.write(f"{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{NC}\n\n")
+
+# Hostname question
+sys.stderr.write(f"Setting the hostname to 'waiveo' enables access via:\n")
+sys.stderr.write(f"  {GREEN}http://waiveo.local{NC}\n\n")
+set_hostname = ask_yes_no("Set hostname to 'waiveo'?", default=True)
+
+sys.stderr.write("\n")
+
+# Port question
+sys.stderr.write(f"The web interface runs on port 80 by default.\n")
+sys.stderr.write(f"Change this if port 80 is already in use.\n\n")
+port = ask_input("Web server port", "80")
+
+# Validate port
+try:
+    port_num = int(port)
+    if not (1 <= port_num <= 65535):
+        port = "80"
+except:
+    port = "80"
+
+sys.stderr.write(f"\n{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{NC}\n\n")
+
+# Output configuration to stdout (captured by bash)
+print(f"SET_HOSTNAME={'true' if set_hostname else 'false'}")
+print(f"WAIVEO_PORT={port}")
+PYTHON_SCRIPT
+)
+    
+    # Parse Python output
+    if [ -n "$config_output" ]; then
+        eval "$config_output"
+    fi
+    
+    # Display confirmation
+    if [ "$SET_HOSTNAME" = "true" ]; then
+        success "Hostname will be set to 'waiveo'"
+    else
+        info "Keeping current hostname"
+    fi
+    success "Web server will run on port $WAIVEO_PORT"
+    echo ""
+}
+
 # Get latest release version from GitHub
 get_latest_version() {
     local latest=$(curl -fsSL "${RELEASES_URL}/latest" 2>/dev/null | grep -o 'tag/v[^"]*' | head -1 | cut -d/ -f2)
@@ -236,6 +339,9 @@ download_release() {
     info "Extracting files..."
     tar -xzf "$tarball" -C / --no-same-owner
     
+    # Set execute permissions on CLI tools
+    chmod +x /usr/local/bin/waiveo* 2>/dev/null || true
+    
     # Cleanup
     rm -rf "$temp_dir"
     
@@ -246,23 +352,76 @@ download_release() {
 configure_system() {
     info "Configuring system..."
     
-    # Only change hostname on Pi (x86 users likely have their own hostname)
-    if is_raspberry_pi; then
+    local hostname_changed="false"
+    
+    # Set hostname to 'waiveo' if on Pi or if user requested it
+    if is_raspberry_pi || [ "$SET_HOSTNAME" = "true" ]; then
         local current_hostname=$(hostname)
         if [ "$current_hostname" != "waiveo" ]; then
             info "Setting hostname to 'waiveo'..."
             hostnamectl set-hostname waiveo
             
             # Update /etc/hosts
-            if ! grep -q "waiveo" /etc/hosts; then
+            if ! grep -q "127.0.1.1.*waiveo" /etc/hosts; then
+                # Remove any existing 127.0.1.1 entry first
+                sed -i '/^127.0.1.1/d' /etc/hosts 2>/dev/null || true
                 echo "127.0.1.1 waiveo" >> /etc/hosts
             fi
+            
+            hostname_changed="true"
+            success "Hostname set to 'waiveo'"
+            
+            # Wait for hostname change to propagate
+            sleep 2
         fi
     fi
     
-    # Enable Avahi for mDNS (waiveo.local)
+    # Configure Avahi for mDNS (hostname.local)
+    info "Configuring mDNS (Avahi)..."
+    
+    # Ensure avahi is configured to publish hostname
+    if [ -f /etc/avahi/avahi-daemon.conf ]; then
+        # Enable publish-hostname if not already set
+        if ! grep -q "^publish-hostname=yes" /etc/avahi/avahi-daemon.conf; then
+            sed -i 's/^#*publish-hostname=.*/publish-hostname=yes/' /etc/avahi/avahi-daemon.conf 2>/dev/null || true
+        fi
+    fi
+    
+    # Enable and restart Avahi (always restart to ensure it picks up current hostname)
     systemctl enable avahi-daemon 2>/dev/null || true
-    systemctl start avahi-daemon 2>/dev/null || true
+    systemctl restart avahi-daemon 2>/dev/null || true
+    
+    # Give avahi a moment to start publishing
+    sleep 1
+    
+    # Open firewall for mDNS if ufw is active
+    if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
+        info "Opening firewall for mDNS..."
+        ufw allow 5353/udp comment 'mDNS' >/dev/null 2>&1 || true
+    fi
+    
+    # Verify Avahi is running and publishing
+    if systemctl is-active --quiet avahi-daemon; then
+        success "mDNS configured - accessible at http://waiveo.local"
+    else
+        warn "Avahi service not running - waiveo.local may not work"
+    fi
+    
+    # Configure custom port if specified
+    if [ "$WAIVEO_PORT" != "80" ]; then
+        info "Configuring web server on port $WAIVEO_PORT..."
+        
+        # Create systemd override directory
+        mkdir -p /etc/systemd/system/waiveo-management.service.d
+        
+        # Create override file with custom port
+        cat > /etc/systemd/system/waiveo-management.service.d/port.conf << EOF
+[Service]
+Environment=WAIVEO_PORT=$WAIVEO_PORT
+EOF
+        
+        success "Web server configured on port $WAIVEO_PORT"
+    fi
     
     # On x86, don't create a waiveo user - users have their own accounts
     # The management UI authenticates against existing system users via PAM
@@ -303,6 +462,12 @@ get_local_ip() {
 # Print completion message
 print_complete() {
     local ip=$(get_local_ip)
+    local port_suffix=""
+    
+    # Add port to URL if not default
+    if [ "$WAIVEO_PORT" != "80" ]; then
+        port_suffix=":${WAIVEO_PORT}"
+    fi
     
     echo ""
     echo -e "${GREEN}============================================${NC}"
@@ -310,10 +475,13 @@ print_complete() {
     echo -e "${GREEN}============================================${NC}"
     echo ""
     echo -e "Access Waiveo at:"
-    echo -e "  ${BOLD}http://${ip}${NC}"
+    echo -e "  ${BOLD}http://${ip}${port_suffix}${NC}"
+    
+    if is_raspberry_pi || [ "$SET_HOSTNAME" = "true" ]; then
+        echo -e "  ${BOLD}http://waiveo.local${port_suffix}${NC}"
+    fi
     
     if is_raspberry_pi; then
-        echo -e "  ${BOLD}http://waiveo.local${NC}"
         echo ""
         echo -e "Default credentials:"
         echo -e "  Username: ${BOLD}waiveo${NC}"
@@ -342,18 +510,52 @@ parse_args() {
                 WAIVEO_VERSION="$2"
                 shift 2
                 ;;
+            --set-hostname)
+                SET_HOSTNAME="true"
+                INTERACTIVE_MODE="false"
+                shift
+                ;;
+            --port|-p)
+                WAIVEO_PORT="$2"
+                INTERACTIVE_MODE="false"
+                shift 2
+                ;;
+            --non-interactive|-y)
+                INTERACTIVE_MODE="false"
+                shift
+                ;;
             --help|-h)
                 echo "Waiveo Installer"
                 echo ""
                 echo "Usage: curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash"
                 echo "       curl -fsSL https://raw.githubusercontent.com/maaxton/waiveo-host-releases/main/install.sh | sudo bash -s -- [options]"
                 echo ""
+                echo "By default, the installer runs in interactive mode with dialog prompts."
+                echo ""
                 echo "Options:"
                 echo "  --version, -v VERSION   Install specific version (e.g., v1.0.0)"
+                echo "  --set-hostname          Set hostname to 'waiveo' for waiveo.local access"
+                echo "  --port, -p PORT         Set web server port (default: 80)"
+                echo "  --non-interactive, -y   Skip interactive prompts, use defaults/flags"
                 echo "  --help, -h              Show this help message"
                 echo ""
                 echo "Environment variables:"
                 echo "  WAIVEO_VERSION          Specific version to install"
+                echo "  SET_HOSTNAME            Set to 'true' to enable waiveo.local"
+                echo "  WAIVEO_PORT             Web server port (default: 80)"
+                echo ""
+                echo "Examples:"
+                echo "  # Interactive install (prompts for options)"
+                echo "  curl -fsSL ... | sudo bash"
+                echo ""
+                echo "  # Non-interactive with waiveo.local hostname"
+                echo "  curl -fsSL ... | sudo bash -s -- --set-hostname"
+                echo ""
+                echo "  # Non-interactive on custom port 8080"
+                echo "  curl -fsSL ... | sudo bash -s -- --port 8080"
+                echo ""
+                echo "  # Non-interactive with defaults (no prompts)"
+                echo "  curl -fsSL ... | sudo bash -s -- -y"
                 exit 0
                 ;;
             *)
@@ -392,6 +594,11 @@ main() {
     check_requirements
     install_dependencies
     install_docker
+    
+    # Show interactive menu if no CLI flags were passed
+    if [ "$INTERACTIVE_MODE" = "true" ]; then
+        show_interactive_menu
+    fi
     
     # Determine version
     if [ "$WAIVEO_VERSION" = "latest" ]; then
