@@ -21,6 +21,7 @@ INSTALL_DIR="/opt/waiveo"
 # Install options (can be set via command line)
 SET_HOSTNAME="${SET_HOSTNAME:-false}"
 WAIVEO_PORT="${WAIVEO_PORT:-80}"
+WAIVEO_DOCKER_TAG="${WAIVEO_DOCKER_TAG:-latest}"
 INTERACTIVE_MODE="true"
 
 # Colors for output
@@ -281,19 +282,35 @@ try:
 except:
     port = "80"
 
+sys.stderr.write("\n")
+
+# Docker tag question
+sys.stderr.write(f"The Docker image tag controls which build of Waiveo is installed.\n")
+sys.stderr.write(f"  {GREEN}latest{NC} - stable release (recommended)\n")
+sys.stderr.write(f"  {YELLOW}alpha{NC}  - pre-release (may be unstable)\n\n")
+docker_tag = ask_input("Docker tag", "latest", "(e.g. latest, alpha, 20260409)")
+
+# Sanitize tag: only alphanumeric + dash + dot + underscore
+import re
+if not re.match(r'^[a-zA-Z0-9.\-_]+$', docker_tag):
+    docker_tag = "latest"
+
 sys.stderr.write(f"\n{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{NC}\n\n")
 
 # Output configuration to stdout (captured by bash)
 print(f"SET_HOSTNAME={'true' if set_hostname else 'false'}")
 print(f"WAIVEO_PORT={port}")
+print(f"WAIVEO_DOCKER_TAG={docker_tag}")
 PYTHON_SCRIPT
 )
     
-    # Parse Python output
+    # Parse Python output (explicit variable extraction — never eval untrusted output)
     if [ -n "$config_output" ]; then
-        eval "$config_output"
+        SET_HOSTNAME=$(echo "$config_output" | grep '^SET_HOSTNAME=' | cut -d= -f2-)
+        WAIVEO_PORT=$(echo "$config_output" | grep '^WAIVEO_PORT=' | cut -d= -f2-)
+        WAIVEO_DOCKER_TAG=$(echo "$config_output" | grep '^WAIVEO_DOCKER_TAG=' | cut -d= -f2-)
     fi
-    
+
     # Display confirmation
     if [ "$SET_HOSTNAME" = "true" ]; then
         success "Hostname will be set to 'waiveo'"
@@ -301,6 +318,7 @@ PYTHON_SCRIPT
         info "Keeping current hostname"
     fi
     success "Web server will run on port $WAIVEO_PORT"
+    success "Docker tag: $WAIVEO_DOCKER_TAG"
     echo ""
 }
 
@@ -454,6 +472,44 @@ enable_services() {
     success "Services enabled"
 }
 
+# Write Docker tag into state.json so the management server uses it on first boot
+configure_docker_tag() {
+    local tag="${WAIVEO_DOCKER_TAG:-latest}"
+    local state_file="${INSTALL_DIR}/state.json"
+
+    # Validate tag (alphanumeric + dash + dot + underscore only)
+    if ! echo "$tag" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+        warn "Invalid Docker tag '$tag', defaulting to 'latest'"
+        tag="latest"
+    fi
+
+    if [ -f "$state_file" ]; then
+        # Update existing state.json: set docker_tag field using Python (stdlib JSON)
+        python3 - "$state_file" "$tag" << 'PYEOF'
+import json, sys
+path, tag = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    state = json.load(f)
+state['docker_tag'] = tag
+tmp = path + '.tmp'
+with open(tmp, 'w') as f:
+    json.dump(state, f, indent=2)
+import os; os.rename(tmp, path)
+PYEOF
+        success "Docker tag set to: $tag"
+    else
+        info "state.json not found yet — tag will be applied on first setup"
+    fi
+
+    # Also update docker-compose.yml image reference if it exists
+    local compose_file="${INSTALL_DIR}/docker-compose.yml"
+    if [ -f "$compose_file" ]; then
+        # Replace the image: maaxton/waiveo:* line
+        sed -i "s|image: maaxton/waiveo:.*|image: maaxton/waiveo:${tag}|g" "$compose_file"
+        success "docker-compose.yml updated: maaxton/waiveo:${tag}"
+    fi
+}
+
 # Get local IP address
 get_local_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "unknown"
@@ -494,6 +550,8 @@ print_complete() {
         echo -e "(The management UI uses your system credentials)"
     fi
     echo ""
+    echo -e "Docker image: ${BOLD}maaxton/waiveo:${WAIVEO_DOCKER_TAG}${NC}"
+    echo ""
     echo -e "CLI commands available:"
     echo -e "  ${CYAN}waiveo status${NC}   - Check service status"
     echo -e "  ${CYAN}waiveo logs${NC}     - View logs"
@@ -520,6 +578,11 @@ parse_args() {
                 INTERACTIVE_MODE="false"
                 shift 2
                 ;;
+            --tag|-t)
+                WAIVEO_DOCKER_TAG="$2"
+                INTERACTIVE_MODE="false"
+                shift 2
+                ;;
             --non-interactive|-y)
                 INTERACTIVE_MODE="false"
                 shift
@@ -536,6 +599,7 @@ parse_args() {
                 echo "  --version, -v VERSION   Install specific version (e.g., v1.0.0)"
                 echo "  --set-hostname          Set hostname to 'waiveo' for waiveo.local access"
                 echo "  --port, -p PORT         Set web server port (default: 80)"
+                echo "  --tag, -t TAG           Docker image tag to use (default: latest)"
                 echo "  --non-interactive, -y   Skip interactive prompts, use defaults/flags"
                 echo "  --help, -h              Show this help message"
                 echo ""
@@ -543,6 +607,7 @@ parse_args() {
                 echo "  WAIVEO_VERSION          Specific version to install"
                 echo "  SET_HOSTNAME            Set to 'true' to enable waiveo.local"
                 echo "  WAIVEO_PORT             Web server port (default: 80)"
+                echo "  WAIVEO_DOCKER_TAG       Docker image tag to pull (default: latest)"
                 echo ""
                 echo "Examples:"
                 echo "  # Interactive install (prompts for options)"
@@ -608,6 +673,7 @@ main() {
     
     download_release "$WAIVEO_VERSION" "$arch"
     configure_system
+    configure_docker_tag
     enable_services
     
     print_complete
