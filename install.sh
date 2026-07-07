@@ -161,10 +161,37 @@ check_requirements() {
     success "System requirements met (RAM: ${mem_gb}GB, Disk: ${free_gb}GB free)"
 }
 
+# Correct a badly-wrong system clock before apt. A freshly-imaged box whose RTC is
+# wrong — and whose network blocks NTP (UDP 123) — makes apt reject repository
+# Release files as "not valid yet", which aborts the install. Try NTP first; if the
+# clock is still off by more than an hour, set it from an HTTP Date header (HTTP
+# works where NTP is firewalled). A correct clock is never touched.
+ensure_clock_sane() {
+    timedatectl set-ntp true 2>/dev/null || true
+    local http_date http_epoch now_epoch skew
+    http_date=$(curl -sI --max-time 10 http://archive.ubuntu.com 2>/dev/null \
+        | grep -i '^date:' | cut -d' ' -f2- | tr -d '\r')
+    [ -n "$http_date" ] || return 0
+    http_epoch=$(date -d "$http_date" +%s 2>/dev/null || echo 0)
+    [ "$http_epoch" -gt 0 ] || return 0
+    now_epoch=$(date +%s)
+    skew=$(( http_epoch - now_epoch )); skew=${skew#-}
+    if [ "$skew" -gt 3600 ]; then
+        warn "System clock off by ~$(( skew / 3600 ))h — setting from network time so apt can validate repositories"
+        timedatectl set-ntp false 2>/dev/null || true
+        date -s "$http_date" >/dev/null 2>&1 || true
+        hwclock --systohc 2>/dev/null || true
+        success "Clock set to $(date -u '+%Y-%m-%d %H:%M UTC')"
+    fi
+}
+
 # Install dependencies
 install_dependencies() {
     info "Installing dependencies..."
-    
+
+    # A wrong clock makes apt reject repo metadata — fix it before any apt call.
+    ensure_clock_sane
+
     # Update package list
     apt-get update -qq
     
@@ -680,6 +707,10 @@ main() {
     info "Installing version: $WAIVEO_VERSION"
     
     download_release "$WAIVEO_VERSION" "$arch"
+    # Record the installed version so the mgmt server reports it accurately
+    # (get_host_image_version reads /etc/waiveo-host-release; without this the
+    # dashboard shows host_image "unknown" on a universal install).
+    echo "${WAIVEO_VERSION#v}" > /etc/waiveo-host-release 2>/dev/null || true
     configure_system
     configure_docker_tag
     enable_services
