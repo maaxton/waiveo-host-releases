@@ -465,7 +465,15 @@ enable_services() {
     # Enable services
     systemctl enable waiveo-management.service 2>/dev/null || true
     systemctl enable waiveo.service 2>/dev/null || true
-    
+
+    # Boot-time factory-reset processor: reads /boot/firmware/waiveo/ flags before
+    # sysinit and acts on them. The Pi image enables this in stage-waiveo/00-run.sh;
+    # the universal (x86/arm64) installer must too — otherwise `waiveo reset` writes
+    # a flag that nothing ever processes and the reboot appears to do nothing.
+    if [ -f /etc/systemd/system/waiveo-factory-reset.service ]; then
+        systemctl enable waiveo-factory-reset.service 2>/dev/null || true
+    fi
+
     # Start management server
     systemctl start waiveo-management.service
     
