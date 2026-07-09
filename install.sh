@@ -185,6 +185,56 @@ ensure_clock_sane() {
     fi
 }
 
+# Wait for any other package manager to release the apt/dpkg locks. A freshly
+# booted Ubuntu/Debian box almost always has apt-daily/unattended-upgrades running
+# at boot, holding the lock for a minute or two — without this wait, the very first
+# apt-get dies with "Could not get lock /var/lib/apt/lists/lock". Bounded so it can
+# never hang forever.
+wait_for_apt() {
+    local waited=0 max=300 announced=0 busy
+    local locks="/var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
+    while :; do
+        busy=0
+        if command -v fuser >/dev/null 2>&1; then
+            for l in $locks; do
+                if fuser "$l" >/dev/null 2>&1; then busy=1; break; fi
+            done
+        elif pgrep -x apt >/dev/null 2>&1 || pgrep -x apt-get >/dev/null 2>&1 \
+             || pgrep -x dpkg >/dev/null 2>&1 || pgrep -f unattended-upgr >/dev/null 2>&1; then
+            busy=1
+        fi
+        [ "$busy" -eq 0 ] && break
+        if [ "$announced" -eq 0 ]; then
+            info "Waiting for another package operation (apt-daily/unattended-upgrades) to finish..."
+            announced=1
+        fi
+        if [ "$waited" -ge "$max" ]; then
+            warn "Package manager still busy after $((max / 60)) min — continuing anyway"
+            break
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+    [ "$announced" -eq 1 ] && [ "$waited" -lt "$max" ] && success "Package manager free — continuing"
+}
+
+# Run an apt-get command, waiting for the lock first and retrying if it's grabbed
+# out from under us (apt-daily can wake up mid-install).
+apt_retry() {
+    local tries=0
+    wait_for_apt
+    until "$@"; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 3 ]; then
+            error "apt command failed after $tries attempts: $*"
+            return 1
+        fi
+        warn "apt was busy — retrying in 10s (attempt $tries/3)..."
+        sleep 10
+        wait_for_apt
+    done
+}
+
 # Install dependencies
 install_dependencies() {
     info "Installing dependencies..."
@@ -192,11 +242,11 @@ install_dependencies() {
     # A wrong clock makes apt reject repo metadata — fix it before any apt call.
     ensure_clock_sane
 
-    # Update package list
-    apt-get update -qq
-    
+    # Update package list (wait out any boot-time apt-daily/unattended-upgrades)
+    apt_retry apt-get update -qq
+
     # Install required packages
-    apt-get install -y -qq \
+    apt_retry apt-get install -y -qq \
         curl \
         ca-certificates \
         gnupg \
@@ -204,7 +254,7 @@ install_dependencies() {
         avahi-utils \
         python3 \
         > /dev/null
-    
+
     success "Dependencies installed"
 }
 
@@ -223,7 +273,10 @@ install_docker() {
     fi
     
     info "Installing Docker..."
-    
+
+    # get.docker.com runs apt internally — wait out any boot-time apt-daily first.
+    wait_for_apt
+
     # Use official Docker install script
     curl -fsSL https://get.docker.com | sh
     
