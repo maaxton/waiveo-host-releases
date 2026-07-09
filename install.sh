@@ -375,8 +375,11 @@ download_release() {
         fatal "Failed to download release from: $tarball_url"
     fi
     
-    # Create directories
-    mkdir -p "$INSTALL_DIR"/{templates,static,backups}
+    # Create directories (keys/ holds the auto-generated at-rest encryption keys,
+    # host-bind-mounted into the app container at /app/keys; the container's
+    # start-prod chowns it to the node uid on first boot)
+    mkdir -p "$INSTALL_DIR"/{templates,static,backups,keys}
+    chmod 700 "$INSTALL_DIR/keys" 2>/dev/null || true
     mkdir -p /usr/local/bin
     mkdir -p /etc/systemd/system
     
