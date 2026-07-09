@@ -215,7 +215,10 @@ wait_for_apt() {
         sleep 5
         waited=$((waited + 5))
     done
-    [ "$announced" -eq 1 ] && [ "$waited" -lt "$max" ] && success "Package manager free — continuing"
+    if [ "$announced" -eq 1 ] && [ "$waited" -lt "$max" ]; then
+        success "Package manager free — continuing"
+    fi
+    return 0   # MUST end 0 — a non-zero return here aborts the installer under `set -e`
 }
 
 # Run an apt-get command, waiting for the lock first and retrying if it's grabbed
